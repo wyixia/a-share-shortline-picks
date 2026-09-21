@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
-"""A股短线选股 · 出每日候选名单（自足脚本，可独立于本项目目录运行）
+"""A股短线选股 · 出每日候选名单（自足脚本）
 
 用法:
-    python 出名单.py 2026-09-17 2026-09-18        # 可传多个交易日
+    python 出名单.py 2026-09-21            # 可传多个交易日
 
 数据目录:
     环境变量 PICKS_DATA_DIR，未设则默认本包旁的 picks_data/
 
-该目录下需要:
+该目录下需要（由 数据准备.py 生成）:
+    close_snap_latest.json       全市场快照（名称/流通股本）
     daily/<交易日>/kline.jsonl   当日全市场 K 线（open/last/high/low/volume/amount/exchange）
     daily/<交易日>/mf.jsonl      当日全市场资金流（MainNetFlow）
-    历史日K jsonl（算 vol3_20 / r3x / vchg 用，约需 21 个交易日）
+    history_kline_<日期>.jsonl   近期历史日 K（算 vol3_20 / r3x / vchg，约 21 个交易日）
 
 输出:
-    <数据目录>/候选_新方案_<日期>.csv
+    <数据目录>/候选_新方案_<日期>.html   HTML 报告（交付物）
+    <数据目录>/候选_新方案_<日期>.csv    数据件
 """
 import json, os, sys, bisect, math, statistics as st, csv
 from collections import defaultdict
@@ -31,23 +33,28 @@ WUNI = np.array([_wj['weights'][n] for n in _wj['feature_order']])
 
 _snapf = [p for p in [os.path.join(DATA_DIR, 'close_snap_latest.json'),
                       os.path.join(DATA_DIR, 'close_snap_20260910.json')] if os.path.exists(p)]
+if not _snapf:
+    print('缺少全市场快照：请先运行 数据准备.py'); sys.exit(1)
 snap = json.load(open(_snapf[0], encoding='utf-8'))
 NAME = {c: (v.get('name') or '') for c, v in snap.items()}
 SH = {c: v['floatcap'] / v['price'] for c, v in snap.items() if v.get('floatcap') and v.get('price')}
 is_star = lambda c: c.startswith(('688', '689'))
 strip = lambda c: c[2:] if c[:2] in ('sh', 'sz', 'bj') else c
 
-# ---------- 历史 K 线（含每日生产快照，快照优先） ----------
+# ---------- 历史 K 线（根目录所有含 ev 的 jsonl + 每日快照，快照优先） ----------
 M = defaultdict(dict)
 _SOURCES = []
 for _f in sorted(os.listdir(DATA_DIR)):
     if not _f.endswith('.jsonl'):
         continue
+    if _f.startswith(('history_kline', 'backfill_kline')):
+        _SOURCES.append(_f)      # 按命名直接纳入：首行可能是 ok:false 的无bar记录，不能只靠内容探测
+        continue
     try:
-        _head = open(os.path.join(DATA_DIR, _f), encoding='utf-8').readline()
+        _head = ''.join(open(os.path.join(DATA_DIR, _f), encoding='utf-8').readlines()[:20])
     except Exception:
         continue
-    if '"ev"' in _head:          # 含 ev 字段的根目录 jsonl 视为K线源（history_kline_*、旧命名等全部兼容）
+    if '"ev"' in _head:
         _SOURCES.append(_f)
 _SOURCES += ['daily/%s/kline.jsonl' % d for d in sorted(os.listdir(os.path.join(DATA_DIR, 'daily')))
              if os.path.isdir(os.path.join(DATA_DIR, 'daily', d))]
@@ -91,7 +98,7 @@ def run(T):
     kp = os.path.join(DATA_DIR, 'daily', T, 'kline.jsonl')
     mp = os.path.join(DATA_DIR, 'daily', T, 'mf.jsonl')
     if not os.path.exists(kp):
-        print('  %s 无生产快照（%s 不存在），跳过' % (T, kp)); return
+        print('  %s 无当日快照（%s 不存在），请先运行 数据准备.py' % (T, kp)); return
     snapK = {}
     for line in open(kp, encoding='utf-8'):
         try:
@@ -123,32 +130,37 @@ def run(T):
     if not snapK:
         print('  %s 快照中无该日 bar，跳过' % T); return
     rows = []
+    _st = defaultdict(int)
     for c, e in snapK.items():
+        _st['总数'] += 1
         if c not in SH:
-            continue
+            _st['无快照SH'] += 1; continue
         dl = MD.get(c)
         if not dl:
-            continue
+            _st['无历史'] += 1; continue
         k = bisect.bisect_right(dl, T) - 1
-        if k < 21 or dl[k] != T:
-            continue
+        if k < 21:
+            _st['历史不足21天'] += 1; continue
+        if dl[k] != T:
+            _st['T不在历史'] += 1; continue
         m = M[c]
         r0, r1 = m[dl[k - 1]], m[T]
         c0, c1 = r0[2], r1[2]
         if c0 <= 0 or c1 <= 0:
-            continue
+            _st['价格异常'] += 1; continue
         if 'ST' in NAME.get(c, '').upper():
-            continue
+            _st['ST'] += 1; continue
         star = is_star(c)
         turn = float(e['exchange']) if e.get('exchange') else None
         if turn is None:
             cnt = r1[5] if star else r1[5] * 100.0
             turn = cnt / SH[c] * 100 if SH[c] > 0 else None
         if turn is None:
-            continue
+            _st['无换手'] += 1; continue
         amt = float(e['amount']) if e.get('amount') else (r1[5] * (1.0 if star else 100.0) * c1)
         if turn < 1.0 or amt < 1e8:
-            continue
+            _st['流动性不足'] += 1; continue
+        _st['合格'] += 1
         v3 = st.mean([m[dl[i]][5] for i in range(k - 2, k + 1)])
         v20 = st.mean([m[dl[i]][5] for i in range(k - 21, k - 1)])
         chg = (c1 / c0 - 1) * 100
@@ -161,7 +173,10 @@ def run(T):
                      'main1': main1,
                      'main1_amt': (main1 / amt) if (main1 is not None and amt > 0) else None,
                      'sealed': chg >= (19.7 if star else 9.7) - 0.3})
+    print('  [关卡分布] %s' % dict(_st), flush=True)
     n = len(rows)
+    if n == 0:
+        print('  合格池 0 只，中止'); return
     X = np.zeros((n, NF), dtype=np.float32)
     for fi, f in enumerate(V5):
         pr = pct100([r.get(f) for r in rows])
@@ -190,7 +205,7 @@ def run(T):
     H = ['<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>候选名单 %s</title><style>%s</style></head><body>' % (T, css)]
     H.append('<h1>短线候选名单 · %s</h1>' % T)
     H.append('<div class="verdict"><b>口径</b>：池子 = 剔ST + 换手≥1%% + 成交额≥1亿（%d 只）｜排序 = 综合A权重｜'
-             '取前 %d（剔封板）｜<b>买入 = 次一交易日开盘，卖出 = 第三日收盘</b>。<br>'
+             '取前 %d，剔封板｜<b>买入 = 次一交易日开盘，卖出 = 第三日收盘</b>。<br>'
              '<span class="small">T 日数据取自 14:45 生产快照；本表为研究口径名单，与生产报告（weights_v3 + A1open）口径不同。</span></div>'
              % (n, len(o)))
     H.append('<table><tr><th>名次</th><th>代码</th><th>名称</th><th>板块</th><th>当日涨幅%</th><th>换手%</th>'
@@ -214,7 +229,9 @@ def run(T):
     print('  输出 %s' % fp, flush=True)
 
 
-for T in (sys.argv[1:] or []):
-    run(T)
-if not sys.argv[1:]:
-    print('用法: python 出名单.py 2026-09-17 2026-09-18')
+if __name__ == '__main__':
+    if not sys.argv[1:]:
+        print('用法: python 出名单.py 2026-09-21')
+        sys.exit(0)
+    for T in sys.argv[1:]:
+        run(T)
