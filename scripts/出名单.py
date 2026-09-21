@@ -4,8 +4,8 @@
 用法:
     python 出名单.py 2026-09-17 2026-09-18        # 可传多个交易日
 
-数据目录（必须）:
-    环境变量 PICKS_DATA_DIR 指向你的数据目录
+数据目录:
+    环境变量 PICKS_DATA_DIR，未设则默认本包旁的 picks_data/
 
 该目录下需要:
     daily/<交易日>/kline.jsonl   当日全市场 K 线（open/last/high/low/volume/amount/exchange）
@@ -20,13 +20,7 @@ from collections import defaultdict
 import numpy as np
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.environ.get('PICKS_DATA_DIR')
-if not DATA_DIR:
-    DATA_DIR = os.path.join(SKILL_DIR, 'picks_data')
-if not os.path.isdir(DATA_DIR):
-    raise SystemExit('[!] 数据目录不存在：%s\n'
-                     '    新环境请先运行: python scripts/准备数据.py <交易日>\n'
-                     '    或用环境变量 PICKS_DATA_DIR 指向已有数据目录。详见 README。' % DATA_DIR)
+DATA_DIR = os.environ.get('PICKS_DATA_DIR') or os.path.join(SKILL_DIR, 'picks_data')
 TOPN = 30
 
 V5 = ['turn', 'vol3_20', 'fcap', 'close', 'r3x', 'vchg', 'main1', 'main1_amt', 'amt', 'gap_d', 'chg']
@@ -35,17 +29,15 @@ NF = len(V5) * 2 + 4
 _wj = json.load(open(os.path.join(SKILL_DIR, 'weights', '统一三开.json'), encoding='utf-8'))
 WUNI = np.array([_wj['weights'][n] for n in _wj['feature_order']])
 
-import glob as _glob
-_snaps = sorted(_glob.glob(os.path.join(DATA_DIR, 'close_snap_*.json')))
-if not _snaps:
-    raise SystemExit('[!] 数据目录缺少 close_snap_*.json。请先运行: python scripts/准备数据.py <交易日>')
-snap = json.load(open(_snaps[-1], encoding='utf-8'))
+_snapf = [p for p in [os.path.join(DATA_DIR, 'close_snap_latest.json'),
+                      os.path.join(DATA_DIR, 'close_snap_20260910.json')] if os.path.exists(p)]
+snap = json.load(open(_snapf[0], encoding='utf-8'))
 NAME = {c: (v.get('name') or '') for c, v in snap.items()}
 SH = {c: v['floatcap'] / v['price'] for c, v in snap.items() if v.get('floatcap') and v.get('price')}
 is_star = lambda c: c.startswith(('688', '689'))
 strip = lambda c: c[2:] if c[:2] in ('sh', 'sz', 'bj') else c
 
-# ---------- 历史 K 线（根目录全部 K 线类 jsonl + 每日快照，快照优先） ----------
+# ---------- 历史 K 线（含每日生产快照，快照优先） ----------
 M = defaultdict(dict)
 _SOURCES = []
 for _f in sorted(os.listdir(DATA_DIR)):
@@ -55,7 +47,7 @@ for _f in sorted(os.listdir(DATA_DIR)):
         _head = open(os.path.join(DATA_DIR, _f), encoding='utf-8').readline()
     except Exception:
         continue
-    if '"ev"' in _head:          # 含 ev 字段的根目录 jsonl 视为K线源（backfill_kline_*.jsonl 等）
+    if '"ev"' in _head:          # 含 ev 字段的根目录 jsonl 视为K线源（history_kline_*、旧命名等全部兼容）
         _SOURCES.append(_f)
 _SOURCES += ['daily/%s/kline.jsonl' % d for d in sorted(os.listdir(os.path.join(DATA_DIR, 'daily')))
              if os.path.isdir(os.path.join(DATA_DIR, 'daily', d))]

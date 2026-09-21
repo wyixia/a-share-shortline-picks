@@ -1,0 +1,12 @@
+{
+  "name": "westock-data-skillhub",
+  "version": "1.0.5",
+  "description": "腾讯自选股-金融数据查询: 提供金融市场结构化数据查询",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "westock-data-skillhub": "./index.js"
+  }
+}
