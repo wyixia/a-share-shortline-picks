@@ -4,9 +4,7 @@ description: A股短线选股 · 生产技能：出某日候选名单并生成 H
 agent_created: true
 ---
 
-# A股短线选股 · 作业手册（通用版，任意 agent 可用）
-
-> **移植说明**：本包从 WorkBuddy 版 skill 复制而来，出名单链路为纯本地代码（Python + numpy + 本地数据文件），**不依赖任何 agent 平台的 MCP 连接器**。任何 agent（TRAE / Cursor / WorkBuddy / Claude 等）把本文件当作操作手册加载即可按任务执行；也可脱离 agent 直接用命令行跑 `scripts/` 下的脚本。
+# A股短线选股 · 作业手册
 
 工作目录 `F:/aigp/alt_screening`（环境变量 `PICKS_DATA_DIR` 可改）。交付一律 HTML/Markdown 表格。
 
