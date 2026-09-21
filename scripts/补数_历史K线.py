@@ -1,22 +1,34 @@
 # -*- coding: utf-8 -*-
-"""K 线历史回补 v2（低并发 + 多重重试 + 断点续跑）
-窗口 2021-09-01 ~ 2024-12-31（含 2024 全年，用于与现有 westock 数据做口径校验）
+"""K 线历史回补（低并发 + 多重重试 + 断点续跑）
+
+用法:
+    python 补数_历史K线.py [BEG] [END]     # 缺省 BEG=20150101，END=今天
+示例:
+    python 补数_历史K线.py 20240101 20260921
+
 输出 backfill_kline.jsonl：{"code":..,"ok":..,"ev":[[date,open,close,high,low,vol,amt,turn],...]}
-vol 单位=手；amt=元；turn=换手率%
+vol 单位=手；amt=元；turn=换手率%。数据目录 = 环境变量 PICKS_DATA_DIR，未设则默认本仓库旁 picks_data/。
 """
-import os, json, os, time, threading, urllib.request, ssl, random
+import os, json, time, threading, datetime, urllib.request, ssl, random
 from concurrent.futures import ThreadPoolExecutor
 
 ssl._create_default_https_context = ssl._create_unverified_context
-DATA_DIR = os.environ.get('PICKS_DATA_DIR')
-if not DATA_DIR:
-    raise SystemExit('[!] 未设置数据目录。请先设置环境变量 PICKS_DATA_DIR 指向你的数据目录\n'                     '    （需含 daily/<交易日>/kline.jsonl、历史日K jsonl、close_snap_*.json，详见 README）。\n'                     '    数据可从零回补：先跑 scripts/补数_历史K线.py 与 scripts/补数_资金流.py。')
-SKILL_W = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'weights')
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.environ.get('PICKS_DATA_DIR') or os.path.join(ROOT, 'picks_data')
+os.makedirs(OUT, exist_ok=True)
+SKILL_W = os.path.join(ROOT, 'weights')
 BK = os.path.join(OUT, 'backfill_kline.jsonl')
-SNAP = os.path.join(OUT, 'close_snap_20260910.json')
+import glob as _glob
+_snaps = sorted(_glob.glob(os.path.join(OUT, 'close_snap_*.json')))
+if not _snaps:
+    raise SystemExit('[!] 数据目录缺少 close_snap_*.json。请先运行: python scripts/准备数据.py <交易日>')
+SNAP = _snaps[-1]
 H = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
      'Referer': 'https://quote.eastmoney.com/'}
-BEG, END = '20210901', '20241231'
+argv = [a for a in __import__('sys').argv[1:]]
+END = (argv[1] if len(argv) > 1 else datetime.date.today().strftime('%Y%m%d')).replace('-', '')
+BEG = (argv[0] if len(argv) > 0 else '20150101').replace('-', '')
+print(f'回补窗口 {BEG} ~ {END} | 数据目录 {OUT}', flush=True)
 WORKERS = 2
 RETRY = 6
 

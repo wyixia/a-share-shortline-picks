@@ -1,9 +1,6 @@
 # 说明：本脚本为可选件（重新训练权重用）。
 # 数据目录：环境变量 PICKS_DATA_DIR（必须设置），需含历史日K与资金流 jsonl。
 # 训练产物会写到本技能的 weights/ 目录。
-# 说明：本脚本为可选件（重新训练权重用）。
-# 数据目录：环境变量 PICKS_DATA_DIR（必须设置），需含历史日K与资金流 jsonl。
-# 训练产物会写到本技能的 weights/ 目录。
 
 # -*- coding: utf-8 -*-
 """成交额口径修正后的「重训 + 全面复评」
@@ -17,11 +14,15 @@ import os, json, os, pickle, bisect, math, statistics as st
 from collections import defaultdict, Counter
 import numpy as np
 
-DATA_DIR = os.environ.get('PICKS_DATA_DIR')
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.environ.get('PICKS_DATA_DIR') or os.path.join(ROOT, 'picks_data')
+os.makedirs(OUT, exist_ok=True)
 if not DATA_DIR:
     raise SystemExit('[!] 未设置数据目录。请先设置环境变量 PICKS_DATA_DIR 指向你的数据目录\n'                     '    （需含 daily/<交易日>/kline.jsonl、历史日K jsonl、close_snap_*.json，详见 README）。\n'                     '    数据可从零回补：先跑 scripts/补数_历史K线.py 与 scripts/补数_资金流.py。')
 SKILL_W = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'weights')
-snap = json.load(open(OUT + '/close_snap_20260910.json', encoding='utf-8'))
+import glob as _glob; _snaps = sorted(_glob.glob(os.path.join(OUT, 'close_snap_*.json'))); 
+if not _snaps: raise SystemExit('[!] 数据目录缺少 close_snap_*.json。先跑 scripts/准备数据.py <交易日> 或自行放置。')
+snap = json.load(open(_snaps[-1], encoding='utf-8'))
 NAME = {c: (v.get('name') or '') for c, v in snap.items()}
 SH = {c: v['floatcap'] / v['price'] for c, v in snap.items() if v.get('floatcap') and v.get('price')}
 is_star = lambda c: c.startswith(('688', '689'))

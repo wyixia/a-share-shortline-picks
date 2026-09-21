@@ -1,20 +1,34 @@
 # -*- coding: utf-8 -*-
-"""腾讯口径资金流全字段回补（westock CLI，批量50只，2021-09-01~2026-09-16）
+"""腾讯口径资金流全字段回补（westock CLI，批量50只，可自定义区间）
+
+依赖（自备项，置于数据目录 PICKS_DATA_DIR 下）：
+    - westock_pkg/package/index.js   腾讯口径 CLI（本仓库不含，需自行获取）
+    - _all_codes.txt                 股票代码清单（每行一个 6 位代码）
 输出：backfill_mf_tx_full.jsonl
 {code, ok, mf:{date:[main, jumbo, block, mainIn, mainOut, mid, retailIn, retailOut, small]}}（单位元）
 字段名：main=MainNetFlow, jumbo=JumboNetFlow, block=BlockNetFlow,
         mainIn=MainInFlow, mainOut=MainOutFlow, mid=MidNetFlow,
         retailIn=RetailInFlow, retailOut=RetailOutFlow, small=SmallNetFlow
+
+用法: python 补数_资金流.py [起始日] [结束日]   # 缺省 2021-09-01 ~ 今天
 """
-import os, json, os, time, subprocess
-DATA_DIR = os.environ.get('PICKS_DATA_DIR')
-if not DATA_DIR:
-    raise SystemExit('[!] 未设置数据目录。请先设置环境变量 PICKS_DATA_DIR 指向你的数据目录\n'                     '    （需含 daily/<交易日>/kline.jsonl、历史日K jsonl、close_snap_*.json，详见 README）。\n'                     '    数据可从零回补：先跑 scripts/补数_历史K线.py 与 scripts/补数_资金流.py。')
-SKILL_W = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'weights')
+import os, json, time, subprocess, datetime
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.environ.get('PICKS_DATA_DIR') or os.path.join(ROOT, 'picks_data')
+os.makedirs(OUT, exist_ok=True)
+SKILL_W = os.path.join(ROOT, 'weights')
 NODE = os.environ.get('NODE_BIN', 'node')  # 默认取 PATH 里的 node，也可用环境变量 NODE_BIN 指定
 CLI = OUT + '/westock_pkg/package/index.js'
 OUTF = OUT + '/backfill_mf_tx_full.jsonl'
-D0, D1 = '2021-09-01', '2026-09-16'
+argv = __import__('sys').argv[1:]
+D1 = (argv[1] if len(argv) > 1 else datetime.date.today().strftime('%Y-%m-%d'))
+D0 = (argv[0] if len(argv) > 0 else '2021-09-01')
+print('回补窗口 %s ~ %s | 数据目录 %s' % (D0, D1, OUT), flush=True)
+if not os.path.exists(CLI):
+    raise SystemExit('[!] 未找到腾讯口径CLI: %s\n'
+                     '    这是自备项（详见脚本头部说明）。若仅出名单，不需要本脚本——准备数据.py 已覆盖当日资金流。' % CLI)
+if not os.path.exists(OUT + '/_all_codes.txt'):
+    raise SystemExit('[!] 数据目录缺少 _all_codes.txt（股票代码清单，每行一个6位代码）。')
 FIELDS = [('MainNetFlow', 0), ('JumboNetFlow', 1), ('BlockNetFlow', 2), ('MainInFlow', 3),
           ('MainOutFlow', 4), ('MidNetFlow', 5), ('RetailInFlow', 6), ('RetailOutFlow', 7),
           ('SmallNetFlow', 8)]
