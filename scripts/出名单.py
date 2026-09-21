@@ -272,6 +272,7 @@ def run(T):
             mktv = (mkl / mp0 - 1) * 100 if (mp0 and mkl) else None
             rows_sum.append((P, src, len(stocks), P, last_d, cur[last_d], mktv,
                              (cur[last_d] - mktv) if mktv is not None else None))
+        rows_sum = rows_sum[::-1]   # 最新批次在前
         H.append('<div class="wrap">')
         H.append('<table><tr><th>批次(选股日)</th><th>来源</th><th>只数</th><th>基准日</th><th>最新数据日</th>'
                  '<th>区间累计%</th><th>同期全市场%</th><th>超额%</th></tr>')
@@ -294,27 +295,35 @@ def run(T):
                  'xAxis:{type:"category",data:%s},yAxis:{type:"value",axisLabel:{formatter:"{value}%%"}},'
                  'series:%s});}else{document.getElementById("chart").innerHTML="（无网络，图表跳过；数据见上表）";}</script>'
                  % (json.dumps(['全市场等权'] + labels), json.dumps(dates_all),
-                    json.dumps([{'name': '全市场等权', 'type': 'line', 'data': [(mkt_lvl.get(d) - 1) * 100 if d in mkt_lvl else None for d in dates_all]}]
+                    json.dumps([{'name': '全市场等权', 'type': 'line', 'data': [mkt_lvl.get(d) - 1 if d in mkt_lvl else None for d in dates_all] and [(mkt_lvl.get(d) - 1) * 100 if d in mkt_lvl else None for d in dates_all]}]
                                + [{'name': lb, 'type': 'line', 'data': [curves[P0b].get(d) for d in dates_all]}
-                                  for (P0b, lb) in zip([b[0] for b in batches], labels)])))
+                                  for (P0b, lb) in zip([b[0] for b in batches][::-1], labels[::-1])])))
         H.append('<p class="small" style="margin-top:2px">各批次曲线自其选股日收盘起算（图中前段为空属正常）；全市场等权=全部有行情股票自最早批次日起等权累计。</p>')
-        # 最近 2 批的逐日明细
-        for P, src, stocks in batches[-2:]:
-            cur = curves.get(P)
-            if not cur:
-                continue
-            H.append('<h3>批次 %s（%s）逐日明细</h3>' % (P, src))
-            H.append('<div class="wrap"><table><tr><th>日期</th><th>累计%</th><th>全市场累计%</th><th>超额%</th></tr>')
-            mp0 = mkt_lvl.get(P)
-            for d in sorted(cur):
-                mkl = mkt_lvl.get(d)
-                mk = (mkl / mp0 - 1) * 100 if (mp0 and mkl) else None
-                H.append('<tr><td>%s</td><td class="%s">%+.2f</td><td>%+.2f</td><td class="%s">%+.2f</td></tr>'
-                         % (d, 'pos' if cur[d] > 0 else 'neg', cur[d], mk if mk is not None else 0,
-                            'pos' if (cur[d] - (mk or 0)) > 0 else 'neg', cur[d] - (mk or 0)))
-            H.append('</table></div>')
     else:
         H.append('<p class="small">暂无可跟踪的历史名单（需数据目录中累积 候选_<日期>.csv，且选股日收盘价已有行情）。</p>')
+
+    # ---- 每批逐股逐日明细（基准=选股日收盘；列为其后每个交易日的收盘价；末列=区间涨幅） ----
+    for P, src, stocks in reversed(batches):
+        dates_b = [d for d in sorted({d for mm in M.values() for d in mm}) if P <= d <= T]
+        rows_px = []
+        for c in stocks:
+            base = M[c][P][2]
+            cells = [M[c].get(d, (None, None, None, None, None, None))[2] for d in dates_b]
+            last = next((v for v in reversed(cells) if v), base)
+            rows_px.append((NAME.get(c, ''), c, base, cells, (last / base - 1) * 100 if base > 0 else 0))
+        rows_px.sort(key=lambda x: -x[4])
+        ups = sum(1 for x in rows_px if x[4] > 0); downs = len(rows_px) - ups
+        best = rows_px[0]; worst = rows_px[-1]
+        H.append('<h3>%s 批 · %s %d 只 · 逐股逐日（基准 %s 收盘，至最新数据日）</h3>' % (P[5:], src, len(stocks), P))
+        H.append('<div class="wrap"><table><tr><th>名称</th><th>代码</th><th>基准</th>'
+                 + ''.join('<th>%s</th>' % d[5:] for d in dates_b) + '<th>区间涨幅</th></tr>')
+        for nm, c, base, cells, ret in rows_px:
+            tds = ''.join('<td>%s</td>' % ('%.2f' % v if v else '—') for v in cells)
+            H.append('<tr><td>%s</td><td>%s</td><td>%.2f</td>%s<td class="%s">%+.2f</td></tr>'
+                     % (nm, c, base, tds, 'pos' if ret > 0 else 'neg', ret))
+        H.append('</table></div>')
+        H.append('<p class="small">区间最强：<b>%s %+.2f%%</b>；最弱：%s %+.2f%%；%d 涨 %d 跌。收盘价缺失记为“—”。</p>'
+                 % (best[0], best[4], worst[0], worst[4], ups, downs))
 
     H.append('<p class="small">生成时间：%s｜数据目录：%s</p>' % (T, DATA_DIR))
     H.append('</body></html>')
