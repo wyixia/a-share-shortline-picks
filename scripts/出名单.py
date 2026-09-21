@@ -14,8 +14,8 @@
     history_kline_<日期>.jsonl   近期历史日 K（算 vol3_20 / r3x / vchg，约 21 个交易日）
 
 输出:
-    <数据目录>/候选_新方案_<日期>.html   HTML 报告（交付物）
-    <数据目录>/候选_新方案_<日期>.csv    数据件
+    <数据目录>/候选_<日期>.html   HTML 报告（交付物）
+    <数据目录>/候选_<日期>.csv    数据件
 """
 import json, os, sys, bisect, math, statistics as st, csv
 from collections import defaultdict
@@ -184,7 +184,7 @@ def run(T):
     X[:, len(V5) * 2:] = 50
     s = X @ WUNI
     o = [i for i in np.argsort(-s) if not rows[i]['sealed']][:TOPN]
-    fp = os.path.join(DATA_DIR, '候选_新方案_%s.csv' % T.replace('-', ''))
+    fp = os.path.join(DATA_DIR, '候选_%s.csv' % T.replace('-', ''))
     with open(fp, 'w', encoding='utf-8-sig', newline='') as f:
         wr = csv.writer(f)
         wr.writerow(['名次', '代码', '名称', '综合分', '当日涨幅%', '换手%', '成交额(亿)', '流通市值(亿)',
@@ -196,7 +196,7 @@ def run(T):
             wr.writerow([rnk, r['code'], r['name'], round(float(s[i]), 1), round(r['chg'], 2),
                          round(r['turn'], 2), round(r['amt'] / 1e8, 2), round(r['fcap'] / 1e8, 0),
                          round(r['main1'] / 1e4, 0) if r['main1'] is not None else '', r['close'], bd])
-    hp = os.path.join(DATA_DIR, '候选_新方案_%s.html' % T.replace('-', ''))
+    hp = os.path.join(DATA_DIR, '候选_%s.html' % T.replace('-', ''))
     css = ('body{font-family:"Microsoft YaHei",sans-serif;max-width:1080px;margin:18px auto;padding:0 16px;color:#1f2328;line-height:1.5;}'
            'h1{font-size:20px;border-bottom:2px solid #d0d7de;padding-bottom:6px;}'
            'table{border-collapse:collapse;margin:8px 0;font-size:12.5px;} th,td{border:1px solid #d0d7de;padding:4px 8px;text-align:center;} th{background:#f6f8fa;}'

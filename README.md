@@ -34,7 +34,7 @@ a-share-shortline-picks/
 
 ```bash
 python scripts/数据准备.py 2026-09-21   # 首次约 10-15 分钟；之后每天约 5-8 分钟（幂等，已有的跳过）
-python scripts/出名单.py 2026-09-21     # 输出 候选_新方案_<日期>.csv 与 .html
+python scripts/出名单.py 2026-09-21     # 输出 候选_<日期>.csv 与 .html
 ```
 
 说明：
