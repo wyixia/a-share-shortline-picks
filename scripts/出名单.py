@@ -271,26 +271,40 @@ def run(T):
         dates_b = cal[i2:i2 + 4]
         if len(dates_b) < 2:
             continue
+        T1 = dates_b[1]                      # 买入日 = 选股日的次一交易日
         rows_px = []
         for rk, c, nm in lst:
-            base = M[c][P][2]
-            cells = [M[c].get(d, (None,) * 6)[2] for d in dates_b[1:]]
-            last = next((v for v in reversed(cells) if v), base)
-            rows_px.append((rk, nm, c, base, cells, (last / base - 1) * 100 if base > 0 else 0))
+            mm = M[c]
+            if T1 not in mm or mm[T1][1] <= 0:
+                continue                     # 无买入日开盘价，剔除
+            base = mm[T1][1]                 # 基准 = T+1 开盘（真实买入价）
+            closes = [mm.get(d, (None,) * 6)[2] for d in dates_b[1:]]
+            chs = []
+            prev = base
+            for v in closes:
+                chs.append((v / prev - 1) * 100 if (v and prev) else None)
+                if v:
+                    prev = v
+            last = prev
+            rows_px.append((rk, nm, c, base, chs, (last / base - 1) * 100 if base > 0 else 0))
+        if len(rows_px) < 10:
+            continue
         rows_px.sort(key=lambda x: x[0])
         ups = sum(1 for x in rows_px if x[5] > 0); downs = len(rows_px) - ups
         best = max(rows_px, key=lambda x: x[5]); worst = min(rows_px, key=lambda x: x[5])
         avg = st.mean([x[5] for x in rows_px])
-        H.append('<h3>%s 批 · %s %d 只 · 基准 %s 收盘 → %s（按名次）</h3>' % (P[5:], src, len(lst), P, dates_b[-1]))
-        H.append('<div class="wrap"><table><tr><th>名次</th><th>名称</th><th>代码</th><th>基准</th>'
-                 + ''.join('<th>%s</th>' % d[5:] for d in dates_b[1:]) + '<th>区间涨幅</th></tr>')
-        for rk, nm, c, base, cells, ret in rows_px:
-            tds = ''.join('<td>%s</td>' % ('%.2f' % v if v else '—') for v in cells)
+        H.append('<h3>%s 批 · %s %d 只 · 基准 %s 开盘（买入价）→ %s（按名次）</h3>' % (P[5:], src, len(rows_px), T1, dates_b[-1]))
+        H.append('<div class="wrap"><table><tr><th>名次</th><th>名称</th><th>代码</th><th>基准(%s开盘)</th>'
+                 % T1 + ''.join('<th>%s 涨幅</th>' % d[5:] for d in dates_b[1:]) + '<th>区间涨幅</th></tr>')
+        for rk, nm, c, base, chs, ret in rows_px:
+            tds = ''.join('<td class="%s">%s</td>' % ('pos' if (v or 0) > 0 else 'neg',
+                                                      '%+.2f' % v if v is not None else '—') for v in chs)
             H.append('<tr><td>%d</td><td>%s</td><td>%s</td><td>%.2f</td>%s<td class="%s">%+.2f</td></tr>'
                      % (rk, nm, c, base, tds, 'pos' if ret > 0 else 'neg', ret))
         H.append('</table></div>')
         H.append('<p class="small">等权 %+.2f%%；最强 %s %+.2f%%；最弱 %s %+.2f%%；%d 涨 %d 跌。'
-                 '前 10 名等权 %+.2f%%（第 1~10 名 vs 第 11~30 名可对照名次梯度）。</p>'
+                 '前 10 名等权 %+.2f%%（第 1~10 名 vs 第 11~30 名可对照名次梯度）。'
+                 '日期列为当日涨幅（红涨绿跌）：首列为买入日开盘→收盘，其后各列为相对前一交易日收盘；基准列为买入日开盘价；区间涨幅=最新收盘/买入价−1。</p>'
                  % (avg, best[1], best[5], worst[1], worst[5], ups, downs,
                     st.mean([x[5] for x in rows_px if x[0] <= 10]) if any(x[0] <= 10 for x in rows_px) else 0))
         _paths.append(P)
