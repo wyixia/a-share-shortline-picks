@@ -17,7 +17,7 @@
     <数据目录>/候选_<日期>.html   HTML 报告（交付物）
     <数据目录>/候选_<日期>.csv    数据件
 """
-import json, os, sys, bisect, math, statistics as st, csv
+import json, os, re, sys, bisect, math, statistics as st, csv
 from collections import defaultdict
 import numpy as np
 
@@ -199,7 +199,7 @@ def run(T):
     hp = os.path.join(DATA_DIR, '候选_%s.html' % T.replace('-', ''))
     css = ('body{font-family:"Microsoft YaHei",sans-serif;max-width:1080px;margin:18px auto;padding:0 16px;color:#1f2328;line-height:1.5;}'
            'h1{font-size:20px;border-bottom:2px solid #d0d7de;padding-bottom:6px;}'
-           'table{border-collapse:collapse;margin:8px 0;font-size:12.5px;} th,td{border:1px solid #d0d7de;padding:4px 8px;text-align:center;} th{background:#f6f8fa;}'
+           '.wrap{overflow-x:auto;} table{border-collapse:collapse;margin:8px 0;font-size:12.5px;min-width:940px;} th,td{border:1px solid #d0d7de;padding:4px 10px;text-align:center;white-space:nowrap;} th{background:#f6f8fa;}'
            '.pos{color:#cf222e;} .neg{color:#1a7f37;font-weight:bold;} .small{font-size:12px;color:#57606a;}'
            '.verdict{background:#eaf6ff;border:1px solid #b6dbff;border-radius:6px;padding:12px 16px;font-size:13.5px;margin:10px 0;}')
     H = ['<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>候选名单 %s</title><style>%s</style></head><body>' % (T, css)]
@@ -208,6 +208,7 @@ def run(T):
              '取前 %d，剔封板｜<b>买入 = 次一交易日开盘，卖出 = 第三日收盘</b>。<br>'
              '<span class="small">T 日数据取自 14:45 生产快照；本表为研究口径名单，与生产报告（weights_v3 + A1open）口径不同。</span></div>'
              % (n, len(o)))
+    H.append('<div class="wrap">')
     H.append('<table><tr><th>名次</th><th>代码</th><th>名称</th><th>板块</th><th>当日涨幅%</th><th>换手%</th>'
              '<th>成交额(亿)</th><th>流通市值(亿)</th><th>主力净流入(万)</th><th>T日价</th></tr>')
     for rnk, i in enumerate(o, 1):
@@ -221,6 +222,61 @@ def run(T):
                     r['fcap'] / 1e8, ('%.0f' % (r['main1'] / 1e4)) if r['main1'] is not None else '—',
                     r['close']))
     H.append('</table>')
+    H.append('</div>')
+
+    # ---- 近几期名单的实际表现（B2收口径回填，数据来自本目录累积的名单 CSV + 历史 K） ----
+    past = {}
+    for f in sorted(os.listdir(DATA_DIR)):
+        m2 = re.match(r'候选_(?:新方案_)?(\d{8})\.csv$', f)
+        if not m2:
+            continue
+        P = '%s-%s-%s' % (m2.group(1)[:4], m2.group(1)[4:6], m2.group(1)[6:])
+        if P >= T:
+            continue
+        try:
+            stocks = [strip(r.get('代码', '')) for r in csv.DictReader(open(os.path.join(DATA_DIR, f), encoding='utf-8-sig'))]
+        except Exception:
+            continue
+        stocks = [c for c in stocks if c]
+        if stocks:
+            past[P] = stocks
+    cal = sorted({d for mm in M.values() for d in mm})
+    review = []
+    for P in sorted(past):
+        i2 = bisect.bisect_right(cal, P)
+        if i2 + 2 > len(cal):
+            continue
+        d1, d2 = cal[i2], cal[i2 + 1]
+        rets = []
+        for c in past[P]:
+            mm = M.get(c)
+            if not mm or d1 not in mm or d2 not in mm:
+                continue
+            o1 = mm[d1][1]; c2 = mm[d2][2]
+            if o1 > 0:
+                rets.append((c2 / o1 - 1) * 100)
+        if len(rets) < 10:
+            continue
+        review.append((P, d1, d2, len(rets), st.mean(rets),
+                       sum(1 for x in rets if x > 0) / len(rets) * 100))
+    review = review[-10:]
+    H.append('<h2>近几期名单实际表现（B2收：次一交易日开盘买 → 第三日收盘卖）</h2>')
+    if review:
+        H.append('<div class="wrap">')
+        H.append('<table><tr><th>选股日</th><th>买入</th><th>卖出</th><th>只数</th><th>等权收益%</th><th>胜率</th></tr>')
+        for P, d1, d2, n2, mean2, win2 in review:
+            H.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td class="%s">%+.3f</td><td>%.0f%%</td></tr>'
+                     % (P, d1, d2, n2, 'pos' if mean2 > 0 else 'neg', mean2, win2))
+        H.append('</table>')
+        H.append('</div>')
+        mr = st.mean([x[4] for x in review])
+        wr = st.mean([x[5] for x in review])
+        cum = (math.prod([1 + x[4] / 100 for x in review]) - 1) * 100
+        H.append('<p class="small">近 %d 期：日均 %+.3f%%、期胜率 %.0f%%、累计 %+.2f%%（B2收口径，未计成本）。'
+                 '名单为候选池，非买入清单。</p>' % (len(review), mr, wr, cum))
+    else:
+        H.append('<p class="small">暂无可回填的历史名单（需数据目录中累积 候选_<日期>.csv，且卖出日已有行情）。</p>')
+
     H.append('<p class="small">生成时间：%s｜数据目录：%s</p>' % (T, DATA_DIR))
     H.append('</body></html>')
     open(hp, 'w', encoding='utf-8').write('\n'.join(H))
