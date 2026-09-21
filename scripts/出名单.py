@@ -224,58 +224,97 @@ def run(T):
     H.append('</table>')
     H.append('</div>')
 
-    # ---- 近几期名单的实际表现（B2收口径回填，数据来自本目录累积的名单 CSV + 历史 K） ----
-    past = {}
+    # ---- 批次跟踪：各期名单自选股日收盘起逐日跟踪至最新数据日（含全市场等权基准与超额） ----
+    batches = []
+    _seen = set()
     for f in sorted(os.listdir(DATA_DIR)):
         m2 = re.match(r'候选_(?:新方案_)?(\d{8})\.csv$', f)
-        if not m2:
+        m3 = None if m2 else re.match(r'候选_(\d{4}-\d{2}-\d{2})\.csv$', f)
+        if m2:
+            P = '%s-%s-%s' % (m2.group(1)[:4], m2.group(1)[4:6], m2.group(1)[6:]); src = '新方案'
+        elif m3:
+            P = m3.group(1); src = '生产线'
+        else:
             continue
-        P = '%s-%s-%s' % (m2.group(1)[:4], m2.group(1)[4:6], m2.group(1)[6:])
-        if P >= T:
+        if P in _seen or P > T:
             continue
         try:
             stocks = [strip(r.get('代码', '')) for r in csv.DictReader(open(os.path.join(DATA_DIR, f), encoding='utf-8-sig'))]
         except Exception:
             continue
-        stocks = [c for c in stocks if c]
-        if stocks:
-            past[P] = stocks
-    cal = sorted({d for mm in M.values() for d in mm})
-    review = []
-    for P in sorted(past):
-        i2 = bisect.bisect_right(cal, P)
-        if i2 + 2 > len(cal):
-            continue
-        d1, d2 = cal[i2], cal[i2 + 1]
-        rets = []
-        for c in past[P]:
-            mm = M.get(c)
-            if not mm or d1 not in mm or d2 not in mm:
+        stocks = [c for c in stocks if c and c in M and P in M[c] and M[c][P][2] > 0]
+        if len(stocks) >= 10:
+            batches.append((P, src, stocks)); _seen.add(P)
+    batches.sort()
+    H.append('<h2>批次跟踪 · 各期名单自选股日收盘起逐日表现（截至最新数据日，全市场等权为基准）</h2>')
+    if batches:
+        P0 = batches[0][0]
+        dates_all = [d for d in sorted({d for mm in M.values() for d in mm}) if P0 <= d <= T]
+        uni = [c for c in M if P0 in M[c] and M[c][P0][2] > 0]
+        mkt_lvl = {}
+        for d in dates_all:
+            vals = [M[c][d][2] / M[c][P0][2] for c in uni if d in M[c] and M[c][d][2] > 0]
+            if len(vals) > 500:
+                mkt_lvl[d] = st.mean(vals)
+        rows_sum = []; curves = {}; labels = []
+        for P, src, stocks in batches:
+            base = st.mean([M[c][P][2] for c in stocks])
+            cur = {}
+            for d in dates_all:
+                vals = [M[c][d][2] for c in stocks if d in M[c] and M[c][d][2] > 0]
+                if len(vals) >= max(10, int(len(stocks) * 0.8)) and base > 0:
+                    cur[d] = (st.mean(vals) / base - 1) * 100
+            if len(cur) < 2:
                 continue
-            o1 = mm[d1][1]; c2 = mm[d2][2]
-            if o1 > 0:
-                rets.append((c2 / o1 - 1) * 100)
-        if len(rets) < 10:
-            continue
-        review.append((P, d1, d2, len(rets), st.mean(rets),
-                       sum(1 for x in rets if x > 0) / len(rets) * 100))
-    review = review[-10:]
-    H.append('<h2>近几期名单实际表现（B2收：次一交易日开盘买 → 第三日收盘卖）</h2>')
-    if review:
+            curves[P] = cur; labels.append('%s(%s)' % (P[5:], src))
+            last_d = sorted(cur)[-1]
+            mp0 = mkt_lvl.get(P); mkl = mkt_lvl.get(last_d)
+            mktv = (mkl / mp0 - 1) * 100 if (mp0 and mkl) else None
+            rows_sum.append((P, src, len(stocks), P, last_d, cur[last_d], mktv,
+                             (cur[last_d] - mktv) if mktv is not None else None))
         H.append('<div class="wrap">')
-        H.append('<table><tr><th>选股日</th><th>买入</th><th>卖出</th><th>只数</th><th>等权收益%</th><th>胜率</th></tr>')
-        for P, d1, d2, n2, mean2, win2 in review:
-            H.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td class="%s">%+.3f</td><td>%.0f%%</td></tr>'
-                     % (P, d1, d2, n2, 'pos' if mean2 > 0 else 'neg', mean2, win2))
+        H.append('<table><tr><th>批次(选股日)</th><th>来源</th><th>只数</th><th>基准日</th><th>最新数据日</th>'
+                 '<th>区间累计%</th><th>同期全市场%</th><th>超额%</th></tr>')
+        for P, src, n2, d0, d1, v, mk, ex in rows_sum:
+            cls = 'pos' if v > 0 else 'neg'
+            H.append('<tr><td>%s</td><td>%s</td><td>%d</td><td>%s</td><td>%s</td>'
+                     '<td class="%s">%+.2f</td><td>%+.2f</td><td class="%s">%+.2f</td></tr>'
+                     % (P, src, n2, d0, d1, cls, v, mk if mk is not None else 0,
+                        'pos' if (ex or 0) > 0 else 'neg', ex if ex is not None else 0))
         H.append('</table>')
         H.append('</div>')
-        mr = st.mean([x[4] for x in review])
-        wr = st.mean([x[5] for x in review])
-        cum = (math.prod([1 + x[4] / 100 for x in review]) - 1) * 100
-        H.append('<p class="small">近 %d 期：日均 %+.3f%%、期胜率 %.0f%%、累计 %+.2f%%（B2收口径，未计成本）。'
-                 '名单为候选池，非买入清单。</p>' % (len(review), mr, wr, cum))
+        mr = st.mean([x[5] for x in rows_sum]) if rows_sum else 0
+        mex = st.mean([x[7] for x in rows_sum if x[7] is not None]) if rows_sum else 0
+        H.append('<p class="small">共 %d 批：区间累计日均 %+.2f%%、对全市场平均超额 %+.2f%%（逐日盯市，未计成本）。'
+                 '名单为候选池，非买入清单。</p>' % (len(rows_sum), mr, mex))
+        H.append('<div class="chart" id="chart"></div>')
+        H.append('<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>')
+        H.append('<script>if(window.echarts){var c=echarts.init(document.getElementById("chart"));'
+                 'c.setOption({tooltip:{trigger:"axis"},legend:{data:%s},'
+                 'xAxis:{type:"category",data:%s},yAxis:{type:"value",axisLabel:{formatter:"{value}%%"}},'
+                 'series:%s});}else{document.getElementById("chart").innerHTML="（无网络，图表跳过；数据见上表）";}</script>'
+                 % (json.dumps(['全市场等权'] + labels), json.dumps(dates_all),
+                    json.dumps([{'name': '全市场等权', 'type': 'line', 'data': [(mkt_lvl.get(d) - 1) * 100 if d in mkt_lvl else None for d in dates_all]}]
+                               + [{'name': lb, 'type': 'line', 'data': [curves[P0b].get(d) for d in dates_all]}
+                                  for (P0b, lb) in zip([b[0] for b in batches], labels)])))
+        H.append('<p class="small" style="margin-top:2px">各批次曲线自其选股日收盘起算（图中前段为空属正常）；全市场等权=全部有行情股票自最早批次日起等权累计。</p>')
+        # 最近 2 批的逐日明细
+        for P, src, stocks in batches[-2:]:
+            cur = curves.get(P)
+            if not cur:
+                continue
+            H.append('<h3>批次 %s（%s）逐日明细</h3>' % (P, src))
+            H.append('<div class="wrap"><table><tr><th>日期</th><th>累计%</th><th>全市场累计%</th><th>超额%</th></tr>')
+            mp0 = mkt_lvl.get(P)
+            for d in sorted(cur):
+                mkl = mkt_lvl.get(d)
+                mk = (mkl / mp0 - 1) * 100 if (mp0 and mkl) else None
+                H.append('<tr><td>%s</td><td class="%s">%+.2f</td><td>%+.2f</td><td class="%s">%+.2f</td></tr>'
+                         % (d, 'pos' if cur[d] > 0 else 'neg', cur[d], mk if mk is not None else 0,
+                            'pos' if (cur[d] - (mk or 0)) > 0 else 'neg', cur[d] - (mk or 0)))
+            H.append('</table></div>')
     else:
-        H.append('<p class="small">暂无可回填的历史名单（需数据目录中累积 候选_<日期>.csv，且卖出日已有行情）。</p>')
+        H.append('<p class="small">暂无可跟踪的历史名单（需数据目录中累积 候选_<日期>.csv，且选股日收盘价已有行情）。</p>')
 
     H.append('<p class="small">生成时间：%s｜数据目录：%s</p>' % (T, DATA_DIR))
     H.append('</body></html>')
