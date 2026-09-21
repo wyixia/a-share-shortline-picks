@@ -263,6 +263,7 @@ def run(T):
         if len(lst) >= 10:
             batches.append((P, src, lst)); _seen.add(P)
     batches.sort()
+    batches = batches[-3:]   # 只回顾最近 3 批（口径 B3=3 个交易日，更老的进累积记录不进日报）
     cal = sorted({d for mm in M.values() for d in mm})
     H.append('<h2>批次回顾 · 每批按获得时的名次排列（基准=选股日收盘；其后最多 3 个交易日，对应 B3 上限）</h2>')
     _paths = []
