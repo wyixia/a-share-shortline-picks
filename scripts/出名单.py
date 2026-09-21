@@ -1,0 +1,210 @@
+# -*- coding: utf-8 -*-
+"""A股短线选股 · 出每日候选名单（自足脚本，可独立于本项目目录运行）
+
+用法:
+    python 出名单.py 2026-09-17 2026-09-18        # 可传多个交易日
+
+数据目录（两选一）:
+    环境变量 PICKS_DATA_DIR
+    默认 F:/aigp/alt_screening
+
+该目录下需要:
+    daily/<交易日>/kline.jsonl   当日全市场 K 线（open/last/high/low/volume/amount/exchange）
+    daily/<交易日>/mf.jsonl      当日全市场资金流（MainNetFlow）
+    历史日K jsonl（算 vol3_20 / r3x / vchg 用，约需 21 个交易日）
+
+输出:
+    <数据目录>/候选_新方案_<日期>.csv
+"""
+import json, os, sys, bisect, math, statistics as st, csv
+from collections import defaultdict
+import numpy as np
+
+SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.environ.get('PICKS_DATA_DIR', 'F:/aigp/alt_screening')
+TOPN = 30
+
+V5 = ['turn', 'vol3_20', 'fcap', 'close', 'r3x', 'vchg', 'main1', 'main1_amt', 'amt', 'gap_d', 'chg']
+NF = len(V5) * 2 + 4
+
+_wj = json.load(open(os.path.join(SKILL_DIR, 'weights', '统一三开.json'), encoding='utf-8'))
+WUNI = np.array([_wj['weights'][n] for n in _wj['feature_order']])
+
+snap = json.load(open(os.path.join(DATA_DIR, 'close_snap_20260910.json'), encoding='utf-8'))
+NAME = {c: (v.get('name') or '') for c, v in snap.items()}
+SH = {c: v['floatcap'] / v['price'] for c, v in snap.items() if v.get('floatcap') and v.get('price')}
+is_star = lambda c: c.startswith(('688', '689'))
+strip = lambda c: c[2:] if c[:2] in ('sh', 'sz', 'bj') else c
+
+# ---------- 历史 K 线（含每日生产快照，快照优先） ----------
+M = defaultdict(dict)
+_SOURCES = ['候选_kline_0917.jsonl', 'latest_kline.jsonl', 'ws_kline_full.jsonl', 'fm_raw.jsonl']
+_SOURCES += ['daily/%s/kline.jsonl' % d for d in sorted(os.listdir(os.path.join(DATA_DIR, 'daily')))
+             if os.path.isdir(os.path.join(DATA_DIR, 'daily', d))]
+for path in _SOURCES:
+    p = os.path.join(DATA_DIR, path)
+    if not os.path.exists(p):
+        continue
+    for line in open(p, encoding='utf-8'):
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if not o.get('ok'):
+            continue
+        c = strip(o['code'])
+        for e in o.get('ev') or []:
+            try:
+                if isinstance(e, dict):
+                    d = e.get('date'); op = float(e['open']); cl = float(e['last'])
+                    hi = float(e['high']); lo = float(e['low']); v = float(e['volume'])
+                else:
+                    d = e[0]; op = float(e[1]); cl = float(e[2]); hi = float(e[3]); lo = float(e[4]); v = float(e[5])
+                if d and op > 0 and cl > 0:
+                    M[c][d] = [d, op, cl, hi, lo, v]
+            except Exception:
+                continue
+MD = {c: sorted(m) for c, m in M.items()}
+print('[1] 历史K线 %d 只' % len(M), flush=True)
+
+
+def pct100(vals):
+    vals = np.array(vals, float)
+    med = np.nanmedian(vals) if not np.all(np.isnan(vals)) else 0.0
+    vals = np.where(np.isnan(vals), med, vals)
+    o = np.argsort(vals, kind='stable')
+    pr = np.empty(len(vals)); pr[o] = np.arange(len(vals)) / max(len(vals) - 1, 1)
+    return pr * 100
+
+
+def run(T):
+    kp = os.path.join(DATA_DIR, 'daily', T, 'kline.jsonl')
+    mp = os.path.join(DATA_DIR, 'daily', T, 'mf.jsonl')
+    if not os.path.exists(kp):
+        print('  %s 无生产快照（%s 不存在），跳过' % (T, kp)); return
+    snapK = {}
+    for line in open(kp, encoding='utf-8'):
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if not o.get('ok'):
+            continue
+        c = strip(o['code'])
+        for e in o.get('ev') or []:
+            if e.get('date') == T:
+                snapK[c] = e
+    MF = {}
+    if os.path.exists(mp):
+        for line in open(mp, encoding='utf-8'):
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            if not o.get('ok'):
+                continue
+            c = strip(o['code'])
+            for e in o.get('ev') or []:
+                if e.get('date') == T and e.get('MainNetFlow') not in (None, '', '-'):
+                    try:
+                        MF[c] = float(e['MainNetFlow'])
+                    except Exception:
+                        continue
+    if not snapK:
+        print('  %s 快照中无该日 bar，跳过' % T); return
+    rows = []
+    for c, e in snapK.items():
+        if c not in SH:
+            continue
+        dl = MD.get(c)
+        if not dl:
+            continue
+        k = bisect.bisect_right(dl, T) - 1
+        if k < 21 or dl[k] != T:
+            continue
+        m = M[c]
+        r0, r1 = m[dl[k - 1]], m[T]
+        c0, c1 = r0[2], r1[2]
+        if c0 <= 0 or c1 <= 0:
+            continue
+        if 'ST' in NAME.get(c, '').upper():
+            continue
+        star = is_star(c)
+        turn = float(e['exchange']) if e.get('exchange') else None
+        if turn is None:
+            cnt = r1[5] if star else r1[5] * 100.0
+            turn = cnt / SH[c] * 100 if SH[c] > 0 else None
+        if turn is None:
+            continue
+        amt = float(e['amount']) if e.get('amount') else (r1[5] * (1.0 if star else 100.0) * c1)
+        if turn < 1.0 or amt < 1e8:
+            continue
+        v3 = st.mean([m[dl[i]][5] for i in range(k - 2, k + 1)])
+        v20 = st.mean([m[dl[i]][5] for i in range(k - 21, k - 1)])
+        chg = (c1 / c0 - 1) * 100
+        main1 = MF.get(c)
+        rows.append({'code': c, 'name': NAME.get(c, ''), 'turn': turn,
+                     'vol3_20': (v3 / v20) if v20 else None, 'fcap': SH[c] * c1, 'close': c1,
+                     'r3x': (m[dl[k - 1]][2] / m[dl[k - 4]][2] - 1) * 100,
+                     'vchg': (r1[5] / r0[5] - 1) * 100 if r0[5] > 0 else None,
+                     'amt': amt, 'gap_d': (r1[1] / c0 - 1) * 100, 'chg': chg,
+                     'main1': main1,
+                     'main1_amt': (main1 / amt) if (main1 is not None and amt > 0) else None,
+                     'sealed': chg >= (19.7 if star else 9.7) - 0.3})
+    n = len(rows)
+    X = np.zeros((n, NF), dtype=np.float32)
+    for fi, f in enumerate(V5):
+        pr = pct100([r.get(f) for r in rows])
+        X[:, fi * 2] = pr; X[:, fi * 2 + 1] = 100 - pr
+    X[:, len(V5) * 2:] = 50
+    s = X @ WUNI
+    o = [i for i in np.argsort(-s) if not rows[i]['sealed']][:TOPN]
+    fp = os.path.join(DATA_DIR, '候选_新方案_%s.csv' % T.replace('-', ''))
+    with open(fp, 'w', encoding='utf-8-sig', newline='') as f:
+        wr = csv.writer(f)
+        wr.writerow(['名次', '代码', '名称', '综合分', '当日涨幅%', '换手%', '成交额(亿)', '流通市值(亿)',
+                     '主力净流入(万)', 'T日价', '板块'])
+        for rnk, i in enumerate(o, 1):
+            r = rows[i]
+            bd = '科创板' if is_star(r['code']) else ('创业板' if r['code'].startswith('30') else
+                 ('北交所' if r['code'][0] in '48' or r['code'].startswith('92') else '主板'))
+            wr.writerow([rnk, r['code'], r['name'], round(float(s[i]), 1), round(r['chg'], 2),
+                         round(r['turn'], 2), round(r['amt'] / 1e8, 2), round(r['fcap'] / 1e8, 0),
+                         round(r['main1'] / 1e4, 0) if r['main1'] is not None else '', r['close'], bd])
+    hp = os.path.join(DATA_DIR, '候选_新方案_%s.html' % T.replace('-', ''))
+    css = ('body{font-family:"Microsoft YaHei",sans-serif;max-width:1080px;margin:18px auto;padding:0 16px;color:#1f2328;line-height:1.5;}'
+           'h1{font-size:20px;border-bottom:2px solid #d0d7de;padding-bottom:6px;}'
+           'table{border-collapse:collapse;margin:8px 0;font-size:12.5px;} th,td{border:1px solid #d0d7de;padding:4px 8px;text-align:center;} th{background:#f6f8fa;}'
+           '.pos{color:#cf222e;} .neg{color:#1a7f37;font-weight:bold;} .small{font-size:12px;color:#57606a;}'
+           '.verdict{background:#eaf6ff;border:1px solid #b6dbff;border-radius:6px;padding:12px 16px;font-size:13.5px;margin:10px 0;}')
+    H = ['<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>候选名单 %s</title><style>%s</style></head><body>' % (T, css)]
+    H.append('<h1>短线候选名单 · %s</h1>' % T)
+    H.append('<div class="verdict"><b>口径</b>：池子 = 剔ST + 换手≥1%% + 成交额≥1亿（%d 只）｜排序 = 综合A权重｜'
+             '取前 %d（剔封板）｜<b>买入 = 次一交易日开盘，卖出 = 第三日收盘</b>。<br>'
+             '<span class="small">T 日数据取自 14:45 生产快照；本表为研究口径名单，与生产报告（weights_v3 + A1open）口径不同。</span></div>'
+             % (n, len(o)))
+    H.append('<table><tr><th>名次</th><th>代码</th><th>名称</th><th>板块</th><th>当日涨幅%</th><th>换手%</th>'
+             '<th>成交额(亿)</th><th>流通市值(亿)</th><th>主力净流入(万)</th><th>T日价</th></tr>')
+    for rnk, i in enumerate(o, 1):
+        r = rows[i]
+        bd = '科创板' if is_star(r['code']) else ('创业板' if r['code'].startswith('30') else
+             ('北交所' if r['code'][0] in '48' or r['code'].startswith('92') else '主板'))
+        cls = 'pos' if r['chg'] > 0 else 'neg'
+        H.append('<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td class="%s">%+.2f</td>'
+                 '<td>%.2f</td><td>%.2f</td><td>%.0f</td><td>%s</td><td>%.2f</td></tr>'
+                 % (rnk, r['code'], r['name'], bd, cls, r['chg'], r['turn'], r['amt'] / 1e8,
+                    r['fcap'] / 1e8, ('%.0f' % (r['main1'] / 1e4)) if r['main1'] is not None else '—',
+                    r['close']))
+    H.append('</table>')
+    H.append('<p class="small">生成时间：%s｜数据目录：%s</p>' % (T, DATA_DIR))
+    H.append('</body></html>')
+    open(hp, 'w', encoding='utf-8').write('\n'.join(H))
+    print('  %s 合格池 %d 只 → Top%d：%s' % (T, n, len(o), '、'.join(rows[i]['name'] for i in o[:8])), flush=True)
+    print('  输出 %s' % hp, flush=True)
+    print('  输出 %s' % fp, flush=True)
+
+
+for T in (sys.argv[1:] or []):
+    run(T)
+if not sys.argv[1:]:
+    print('用法: python 出名单.py 2026-09-17 2026-09-18')
