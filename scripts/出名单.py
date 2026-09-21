@@ -4,9 +4,8 @@
 用法:
     python 出名单.py 2026-09-17 2026-09-18        # 可传多个交易日
 
-数据目录（两选一）:
-    环境变量 PICKS_DATA_DIR
-    默认 F:/aigp/alt_screening
+数据目录（必须）:
+    环境变量 PICKS_DATA_DIR 指向你的数据目录
 
 该目录下需要:
     daily/<交易日>/kline.jsonl   当日全市场 K 线（open/last/high/low/volume/amount/exchange）
@@ -21,7 +20,9 @@ from collections import defaultdict
 import numpy as np
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.environ.get('PICKS_DATA_DIR', 'F:/aigp/alt_screening')
+DATA_DIR = os.environ.get('PICKS_DATA_DIR')
+if not DATA_DIR:
+    raise SystemExit('[!] 未设置数据目录。请先设置环境变量 PICKS_DATA_DIR 指向你的数据目录\n'                     '    （需含 daily/<交易日>/kline.jsonl、历史日K jsonl、close_snap_*.json，详见 README）。\n'                     '    数据可从零回补：先跑 scripts/补数_历史K线.py 与 scripts/补数_资金流.py。')
 TOPN = 30
 
 V5 = ['turn', 'vol3_20', 'fcap', 'close', 'r3x', 'vchg', 'main1', 'main1_amt', 'amt', 'gap_d', 'chg']

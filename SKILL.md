@@ -1,11 +1,11 @@
 ---
 name: a-share-shortline-picks
-description: A股短线选股 · 生产技能：出某日候选名单并生成 HTML 报告（持有口径=次日开盘买、第三日收盘卖）。当用户要"出今日/某日候选名单""看某天的票""跑选股"时使用。数据目录默认 F:/aigp/alt_screening。
+description: A股短线选股 · 生产技能：出某日候选名单并生成 HTML 报告（持有口径=次日开盘买、第三日收盘卖）。当用户要"出今日/某日候选名单""看某天的票""跑选股"时使用。数据目录由环境变量 `PICKS_DATA_DIR` 指定（必须设置）。
 ---
 
 # A股短线选股 · 作业手册
 
-工作目录 `F:/aigp/alt_screening`（环境变量 `PICKS_DATA_DIR` 可改）。交付一律 HTML/Markdown 表格。
+数据目录由环境变量 `PICKS_DATA_DIR` 指定（**必须设置**，路径因机器而异，不写死）。交付一律 HTML/Markdown 表格。
 
 ---
 
@@ -36,7 +36,7 @@ description: A股短线选股 · 生产技能：出某日候选名单并生成 H
 ## 二、环境要求（每次都适用）
 
 - Python 3.x + numpy；命令一律 `python scripts/xxx.py <日期>` 的形式。
-- 数据目录：环境变量 `PICKS_DATA_DIR`，默认 `F:/aigp/alt_screening`（须可访问；含 `daily/` 快照与历史 jsonl，约 2.9 GB）。
+- 数据目录：环境变量 `PICKS_DATA_DIR`（必须设置；含 `daily/` 快照与历史 jsonl）。
 - 一切取数优先读本地文件；确需现拉时用普通 HTTP/本地 CLI，**不依赖任何平台的 MCP 连接器**。
 - 遇到数据源限频 → 改用本地数据，**不要反复重试**。
 - 交付一律 HTML / Markdown 表格，不给 .py / .log / .txt 原始件。
@@ -74,7 +74,7 @@ description: A股短线选股 · 生产技能：出某日候选名单并生成 H
 
 等 T+1、T+2 两个交易日走完，取 T+1 开盘价与 T+2 收盘价，
 `收益 = T+2收盘 / T+1开盘 - 1` 逐只计算，等权平均即该期收益。
-（参考：`F:/aigp/alt_screening/新方案_20260916_效果.py`）
+（参考写法：收益 = T+2收盘 / T+1开盘 - 1，逐只算后等权平均）
 
 ---
 

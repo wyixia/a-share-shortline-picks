@@ -23,11 +23,12 @@ a-share-shortline-picks/
 ## 环境要求
 
 - Python 3.x + numpy
-- 数据目录（默认 `F:/aigp/alt_screening`，可用环境变量 `PICKS_DATA_DIR` 指定），需包含：
+- 数据目录：环境变量 `PICKS_DATA_DIR`（**必须设置**，路径因机器而异，不写死），需包含：
   - `daily/<交易日>/kline.jsonl` + `mf.jsonl`：当日全市场 K 线与资金流快照（收盘前时点）
   - 历史日 K jsonl（算量比/涨幅因子用，约需 21 个交易日）：`候选_kline_*.jsonl` / `latest_kline.jsonl` / `ws_kline_full.jsonl` 等
   - `close_snap_*.json`：流通股本 / 名称 / ST 标记快照
 - 快照数据由外部定时任务生成；本包只消费，不负责生产快照。
+- **从零准备数据**（新机器/重训权重时）：先跑 `scripts/补数_历史K线.py`（东财接口回补历史K线）与 `scripts/补数_资金流.py`（腾讯口径资金流，依赖数据目录内的 westock_pkg CLI 与代码清单 `_all_codes.txt`），产物写入 `PICKS_DATA_DIR`。
 
 ## 快速开始
 

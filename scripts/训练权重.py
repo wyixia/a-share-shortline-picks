@@ -1,8 +1,8 @@
 # 说明：本脚本为可选件（重新训练权重用）。
-# 数据目录：环境变量 PICKS_DATA_DIR（默认 F:/aigp/alt_screening），需含历史日K与资金流 jsonl。
+# 数据目录：环境变量 PICKS_DATA_DIR（必须设置），需含历史日K与资金流 jsonl。
 # 训练产物会写到本技能的 weights/ 目录。
 # 说明：本脚本为可选件（重新训练权重用）。
-# 数据目录：环境变量 PICKS_DATA_DIR（默认 F:/aigp/alt_screening），需含历史日K与资金流 jsonl。
+# 数据目录：环境变量 PICKS_DATA_DIR（必须设置），需含历史日K与资金流 jsonl。
 # 训练产物会写到本技能的 weights/ 目录。
 
 # -*- coding: utf-8 -*-
@@ -17,7 +17,9 @@ import os, json, os, pickle, bisect, math, statistics as st
 from collections import defaultdict, Counter
 import numpy as np
 
-OUT = os.environ.get('PICKS_DATA_DIR', 'F:/aigp/alt_screening')
+DATA_DIR = os.environ.get('PICKS_DATA_DIR')
+if not DATA_DIR:
+    raise SystemExit('[!] 未设置数据目录。请先设置环境变量 PICKS_DATA_DIR 指向你的数据目录\n'                     '    （需含 daily/<交易日>/kline.jsonl、历史日K jsonl、close_snap_*.json，详见 README）。\n'                     '    数据可从零回补：先跑 scripts/补数_历史K线.py 与 scripts/补数_资金流.py。')
 SKILL_W = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'weights')
 snap = json.load(open(OUT + '/close_snap_20260910.json', encoding='utf-8'))
 NAME = {c: (v.get('name') or '') for c, v in snap.items()}

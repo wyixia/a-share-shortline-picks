@@ -7,7 +7,9 @@
         retailIn=RetailInFlow, retailOut=RetailOutFlow, small=SmallNetFlow
 """
 import os, json, os, time, subprocess
-OUT = os.environ.get('PICKS_DATA_DIR', 'F:/aigp/alt_screening')
+DATA_DIR = os.environ.get('PICKS_DATA_DIR')
+if not DATA_DIR:
+    raise SystemExit('[!] 未设置数据目录。请先设置环境变量 PICKS_DATA_DIR 指向你的数据目录\n'                     '    （需含 daily/<交易日>/kline.jsonl、历史日K jsonl、close_snap_*.json，详见 README）。\n'                     '    数据可从零回补：先跑 scripts/补数_历史K线.py 与 scripts/补数_资金流.py。')
 SKILL_W = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'weights')
 NODE = os.environ.get('NODE_BIN', 'node')  # 默认取 PATH 里的 node，也可用环境变量 NODE_BIN 指定
 CLI = OUT + '/westock_pkg/package/index.js'
